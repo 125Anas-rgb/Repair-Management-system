@@ -1,0 +1,336 @@
+// RepairTrack database schema (first half: roadmap modules 1 to 6).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // The connection URL is built in prisma.config.js from the values in .env.
+}
+
+
+enum ShopStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  CLOSURE_REQUESTED
+  CLOSED
+  SUSPENDED
+}
+
+
+enum ShopRole {
+  SHOP_ADMIN
+  FRONT_DESK
+  TECHNICIAN
+}
+
+
+enum PlatformRole {
+  PLATFORM_OWNER
+}
+
+
+enum TicketStatus {
+  RECEIVED
+  DIAGNOSING
+  AWAITING_APPROVAL
+  AWAITING_PARTS
+  REPAIRING
+  QUALITY_CHECK
+  READY_FOR_PICKUP
+  COMPLETED
+  CANCELLED
+  UNREPAIRABLE
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum DeviceCategory {
+  PHONE
+  TABLET
+  LAPTOP
+  DESKTOP
+  SMARTWATCH
+  CONSOLE
+  OTHER
+}
+
+enum NoteKind {
+  DIAGNOSIS
+  REPAIR
+  INTERNAL
+}
+
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  fullName     String        @map("full_name") @db.VarChar(120)
+  email        String?       @unique @db.VarChar(160)
+  phone        String       @unique @db.VarChar(30)
+  passwordHash String        @map("password_hash") @db.VarChar(100)
+  platformRole PlatformRole? @map("platform_role")
+  isActive     Boolean       @default(true) @map("is_active")
+  lastLoginAt  DateTime?     @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  memberships          ShopMember[]    @relation("MemberUser")
+  membershipsCreated   ShopMember[]    @relation("MemberCreatedBy")
+  refreshTokens        RefreshToken[]
+  shopsAdministered    Shop[]          @relation("ShopPrimaryAdmin")
+  closuresRequested    Shop[]          @relation("ShopClosureRequestedBy")
+  customerProfiles     Customer[]
+  ticketsCreated       RepairTicket[]  @relation("TicketCreatedBy")
+  ticketsAssigned      RepairTicket[]  @relation("TicketTechnician")
+  photosUploaded       TicketPhoto[]
+  assignmentsReceived  Assignment[]    @relation("AssignmentTechnician")
+  assignmentsMade      Assignment[]    @relation("AssignmentAssignedBy")
+  statusChanges        StatusHistory[]
+  notes                TicketNote[]
+  guestTokensCreated   GuestToken[]
+  auditLogs            AuditLog[]
+
+  @@map("users")
+}
+
+model Shop {
+  id                 String     @id @default(uuid()) @db.Uuid
+  shopCode           String     @unique @map("shop_code") @db.VarChar(20)
+  name               String     @db.VarChar(150)
+  normalizedName     String     @map("normalized_name") @db.VarChar(150)
+  businessRegNo      String?    @unique @map("business_reg_no") @db.VarChar(60)
+  phone              String     @unique @db.VarChar(30)
+  email              String     @unique @db.VarChar(160)
+  address            String     @db.VarChar(255)
+  city               String     @db.VarChar(80)
+  normalizedCity     String     @map("normalized_city") @db.VarChar(80)
+  status             ShopStatus @default(ACTIVE)
+  primaryAdminId     String?    @map("primary_admin_id") @db.Uuid
+  closureRequestedBy String?    @map("closure_requested_by") @db.Uuid
+  closureReason      String?    @map("closure_reason") @db.VarChar(500)
+  closureRequestedAt DateTime?  @map("closure_requested_at") @db.Timestamptz(6)
+  closedAt           DateTime?  @map("closed_at") @db.Timestamptz(6)
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  primaryAdmin       User?   @relation("ShopPrimaryAdmin", fields: [primaryAdminId], references: [id])
+  closureRequester   User?   @relation("ShopClosureRequestedBy", fields: [closureRequestedBy], references: [id])
+
+  members       ShopMember[]
+  refreshTokens RefreshToken[]
+  customers     Customer[]
+  tickets       RepairTicket[]
+  photos        TicketPhoto[]
+  assignments   Assignment[]
+  statusHistory StatusHistory[]
+  notes         TicketNote[]
+  guestTokens   GuestToken[]
+  auditLogs     AuditLog[]
+
+  @@unique([normalizedName, normalizedCity])
+  @@map("shops")
+}
+
+model ShopMember {
+  id        String   @id @default(uuid()) @db.Uuid
+  shopId    String   @map("shop_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  role      ShopRole
+  isActive  Boolean  @default(true) @map("is_active")
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  shop    Shop  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user    User  @relation("MemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  creator User? @relation("MemberCreatedBy", fields: [createdBy], references: [id])
+
+  @@unique([shopId, userId])
+  @@map("shop_members")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  shopId    String?   @map("shop_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// ---------- Customers and tickets ----------
+
+model Customer {
+  id        String   @id @default(uuid()) @db.Uuid
+  shopId    String   @map("shop_id") @db.Uuid
+  fullName  String   @map("full_name") @db.VarChar(120)
+  phone     String   @db.VarChar(30)
+  email     String?  @db.VarChar(160)
+  userId    String?  @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  shop    Shop           @relation(fields: [shopId], references: [id])
+  user    User?          @relation(fields: [userId], references: [id])
+  tickets RepairTicket[]
+
+  @@unique([shopId, phone])
+  @@map("customers")
+}
+
+model RepairTicket {
+  id                   String         @id @default(uuid()) @db.Uuid
+  shopId               String         @map("shop_id") @db.Uuid
+  publicRef            String         @unique @map("public_ref") @db.VarChar(20)
+  customerId           String         @map("customer_id") @db.Uuid
+  deviceCategory       DeviceCategory @map("device_category")
+  brand                String         @db.VarChar(60)
+  model                String         @db.VarChar(80)
+  serialImei           String?        @map("serial_imei") @db.VarChar(60)
+  reportedIssue        String         @map("reported_issue")
+  intakeCondition      String?        @map("intake_condition")
+  accessories          String?        @db.VarChar(255)
+  priority             TicketPriority @default(NORMAL)
+  status               TicketStatus   @default(RECEIVED)
+  assignedTechnicianId String?        @map("assigned_technician_id") @db.Uuid
+  cancelReason         String?        @map("cancel_reason") @db.VarChar(500)
+  version              Int            @default(1)
+  createdById          String         @map("created_by") @db.Uuid
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  shop               Shop     @relation(fields: [shopId], references: [id])
+  customer           Customer @relation(fields: [customerId], references: [id])
+  assignedTechnician User?    @relation("TicketTechnician", fields: [assignedTechnicianId], references: [id])
+  createdBy          User     @relation("TicketCreatedBy", fields: [createdById], references: [id])
+
+  photos        TicketPhoto[]
+  assignments   Assignment[]
+  statusHistory StatusHistory[]
+  notes         TicketNote[]
+  guestTokens   GuestToken[]
+
+  @@index([shopId, status])
+  @@index([shopId, createdAt])
+  @@map("repair_tickets")
+}
+
+model TicketPhoto {
+  id           String   @id @default(uuid()) @db.Uuid
+  shopId       String   @map("shop_id") @db.Uuid
+  ticketId     String   @map("ticket_id") @db.Uuid
+  fileName     String   @map("file_name") @db.VarChar(255)
+  originalName String?  @map("original_name") @db.VarChar(255)
+  mimeType     String   @map("mime_type") @db.VarChar(80)
+  sizeBytes    Int      @map("size_bytes")
+  uploadedById String   @map("uploaded_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  shop       Shop         @relation(fields: [shopId], references: [id])
+  ticket     RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  uploadedBy User         @relation(fields: [uploadedById], references: [id])
+
+  @@map("ticket_photos")
+}
+
+model Assignment {
+  id           String    @id @default(uuid()) @db.Uuid
+  shopId       String    @map("shop_id") @db.Uuid
+  ticketId     String    @map("ticket_id") @db.Uuid
+  technicianId String    @map("technician_id") @db.Uuid
+  assignedById String    @map("assigned_by") @db.Uuid
+  assignedAt   DateTime  @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  unassignedAt DateTime? @map("unassigned_at") @db.Timestamptz(6)
+
+  shop       Shop         @relation(fields: [shopId], references: [id])
+  ticket     RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  technician User         @relation("AssignmentTechnician", fields: [technicianId], references: [id])
+  assignedBy User         @relation("AssignmentAssignedBy", fields: [assignedById], references: [id])
+
+  @@map("assignments")
+}
+
+model StatusHistory {
+  id              String        @id @default(uuid()) @db.Uuid
+  shopId          String        @map("shop_id") @db.Uuid
+  ticketId        String        @map("ticket_id") @db.Uuid
+  fromStatus      TicketStatus? @map("from_status")
+  toStatus        TicketStatus  @map("to_status")
+  actorId         String        @map("actor_id") @db.Uuid
+  reason          String?       @db.VarChar(500)
+  customerVisible Boolean       @default(true) @map("customer_visible")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  shop   Shop         @relation(fields: [shopId], references: [id])
+  ticket RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor  User         @relation(fields: [actorId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@map("status_history")
+}
+
+model TicketNote {
+  id               String   @id @default(uuid()) @db.Uuid
+  shopId           String   @map("shop_id") @db.Uuid
+  ticketId         String   @map("ticket_id") @db.Uuid
+  authorId         String   @map("author_id") @db.Uuid
+  kind             NoteKind
+  body             String
+  timeSpentMinutes Int?     @map("time_spent_minutes")
+  partsRequired    String?  @map("parts_required") @db.VarChar(500)
+  isInternal       Boolean  @default(true) @map("is_internal")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  shop   Shop         @relation(fields: [shopId], references: [id])
+  ticket RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User         @relation(fields: [authorId], references: [id])
+
+  @@map("ticket_notes")
+}
+
+model GuestToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  shopId      String    @map("shop_id") @db.Uuid
+  ticketId    String    @map("ticket_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdById String?   @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  shop      Shop         @relation(fields: [shopId], references: [id])
+  ticket    RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdBy User?        @relation(fields: [createdById], references: [id])
+
+  @@map("guest_tokens")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  shopId    String?  @map("shop_id") @db.Uuid
+  actorId   String?  @map("actor_id") @db.Uuid
+  action    String   @db.VarChar(80)
+  entity    String   @db.VarChar(60)
+  entityId  String?  @map("entity_id") @db.Uuid
+  details   Json?
+  ip        String?  @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  shop  Shop? @relation(fields: [shopId], references: [id])
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([shopId, createdAt])
+  @@map("audit_logs")
+}

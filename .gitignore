@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# secrets
+.env
+.env.local
+
+# build output
+dist/
+web-build/
+.expo/
+
+# uploaded photos (kept out of Git)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# logs and OS files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
